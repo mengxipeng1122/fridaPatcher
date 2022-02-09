@@ -1,0 +1,183 @@
+
+////////////////////////////////////////////////////////////////////////////////
+// this is a file  for frida in typescript 
+// 
+
+////////////////////////////////////////////////////////////////////////////////
+// c source code                  
+{% for l in cCode %} 
+// {{l}} {% endfor  %}
+
+let jump16InstrMaxOffset=0x800000;
+
+function alignNum(n:number, align:number){
+    return Math.floor((n+align-1)/align) *align
+}
+
+function typedArrayToBuffer(array: Uint8Array): ArrayBuffer {
+    return array.buffer.slice(array.byteOffset, array.byteLength + array.byteOffset) as ArrayBuffer
+}
+
+
+function putImmToMovRegInstrThumb(u:number, addr:NativePointer){
+    let b0 = (u>>0x00) &0xf
+    let b1 = (u>>0x04) &0xf
+    let b2 = (u>>0x08) &0x7
+    let b3 = (u>>0x0b) &0x1
+    let b4 = (u>>0x0c) &0xf
+    let ob = addr.readU32() >>>0
+    ob &= 0x8f00fbf0
+    ob |= (b0) << 0x10
+    ob |= (b1) << 0x14
+    ob |= (b2) << 0x1c
+    ob |= (b3) << 0x0a
+    ob |= (b4) << 0x00
+    ob >>>=0
+    addr.writeU32(ob)
+}
+
+function getJumpOffset(src:NativePointer, tag:NativePointer):number{
+    let srcInt = src.toInt32();
+    let tagInt = tag.toInt32();
+    return tagInt-srcInt;
+}
+
+        
+class HookCode {
+    INST:Uint8Array = new Uint8Array([
+{% for n in bs %} {{n}}, {% endfor  %}
+        ]);
+
+    buffer: NativePointer = ptr(0);
+
+    originalCodeAddr:NativePointer=ptr(0);
+    jumpBackInstAddr:NativePointer=ptr(0);
+    jumpTarget      :NativePointer=ptr(0);
+    symbolAddr      :Map<string, NativePointer> = new Map<string, NativePointer>();
+    rels            :
+            {"addr": NativePointer,  "type": number, "symbolName":string  } [] =[];
+
+    initCodeBuffer(buffer:NativePointer){
+        // put 
+        buffer.writeByteArray(typedArrayToBuffer(this.INST));
+
+      this.originalCodeAddr  =buffer.add({{originalCodeOffset   }}); 
+      this.jumpBackInstAddr  =buffer.add({{jumpBackOffset       }}); 
+      this.jumpTarget        =buffer.add({{jumpTargetOffset     }}); 
+
+        this.symbolAddr       = new Map<string, NativePointer>( [
+        {% for k, v in objectSymbolOffset.items() %}
+     [  "{{k}}",         buffer.add({{v}})  ],  
+        {% endfor %}
+        ]);
+
+        this.rels = [
+        {% for r in objectRels %}
+      {"addr": buffer.add({{r['offset']}}),  "type": {{r['type']}}, "symbolName":"{{r['symbolName']}}"  }, 
+        {% endfor %}
+        
+        ];
+
+
+    }
+
+    constructor() { 
+        let codeLen = alignNum(this.INST.byteLength, Process.pageSize);
+        let buffer = Memory.alloc(codeLen)
+        Memory.protect(buffer, codeLen, 'rwx');
+        this.initCodeBuffer(buffer)
+        this.buffer = buffer;
+    };
+
+
+    link(addr:NativePointer, cbs:Map<string, NativePointer>, reAllocBuffer:boolean):NativePointer{
+
+        if(reAllocBuffer){
+            let codeLen = alignNum(this.INST.byteLength, Process.pageSize);
+            let buffer = Memory.alloc(codeLen, {near:addr,maxDistance:jump16InstrMaxOffset})
+            Memory.protect(buffer, codeLen, 'rwx');
+            this.initCodeBuffer(buffer)
+            this.buffer = buffer;
+        }
+
+        // fix relocations;
+        this.rels.forEach(r=>{
+            let symbolAddr=null;
+            if(symbolAddr==null) {
+                const a = this.symbolAddr.get(r.symbolName)
+                if(a !=null) { symbolAddr = a }
+            }
+            if(symbolAddr==null) {
+                const a = cbs.get(r.symbolName)
+                if(a!=null){ symbolAddr = a ; }
+            }
+            if(symbolAddr==null) {
+                try{
+                    const a = Module.getExportByName(null, r.symbolName)
+                    if(a!=null){ symbolAddr = a ; }
+                }
+                catch(e){
+                    console.log(e)
+                }
+            }
+            if(symbolAddr==null) { throw `can not found symbol ${r.symbolName}`; }
+            if(r.type == 0x2f ) {
+                // 0x2f R_ARM_THM_MOVW_AB
+                let u = (symbolAddr.toUInt32() >>0x00) & 0xffff
+                putImmToMovRegInstrThumb(u, r.addr)
+            }
+            else if(r.type == 0x30){
+                // 0x30 R_ARM_THM_MOVT_AB
+                let u = (symbolAddr.toUInt32() >>>0x10) & 0xffff
+                putImmToMovRegInstrThumb(u, r.addr)
+            }
+        });
+
+        // puth jump back address // always long jump
+        let jumpOffset = getJumpOffset(addr.add(4), this.jumpTarget);
+
+        if(Math.abs(jumpOffset)<jump16InstrMaxOffset) {
+            console.log('use 32bit jump')
+            let jumpBackTarget = addr.add(4).toUInt32();
+            jumpBackTarget |=1
+            jumpBackTarget>>>=0;
+            this.jumpBackInstAddr.writeU32(jumpBackTarget)
+
+            // put origianl code 
+            // use B jmp code // 32bit thumb
+            let originCode = addr.readByteArray(4)
+            if (originCode==null) { throw `read origin code at ${addr}failed ` }
+            this.originalCodeAddr.writeByteArray(originCode)
+
+            // put jump code at original addr
+            Memory.protect(addr, 4, 'rwx');
+            let writer = new ThumbWriter(addr)
+            writer.putBImm(this.jumpTarget)
+            writer.flush()
+        }
+        else {
+            console.log('use 64bit jump')
+            let jumpBackTarget = addr.add(8).toUInt32();
+            jumpBackTarget |=1
+            jumpBackTarget>>>=0;
+            this.jumpBackInstAddr.writeU32(jumpBackTarget)
+
+            // put origianl code 
+            let originCode = addr.readByteArray(8)
+            if (originCode==null) { throw `read origin code at ${addr}failed ` }
+            this.originalCodeAddr.writeByteArray(originCode)
+
+            // put jump code at original addr
+            Memory.protect(addr, 8, 'rwx');
+            addr.add(0x00).writeU32(0xf000f8df); // LDR PC, $0 in thumb code
+            let ob = this.jumpTarget.toUInt32();
+            ob |= 1;
+            ob >>>=0;
+            addr.add(0x04).writeU32(ob)
+        }
+        return this.buffer
+    };
+}
+
+export const code = new HookCode();
+        
