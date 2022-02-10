@@ -60,6 +60,8 @@ class CModuleConverter():
     def __init__(self):
         # always use ELF object file ?
         self.objfn = '/tmp/tt.o'
+        self.templateFn=None
+        self.source    = None
         self.secInfos = [] 
         self.secMap   = {} #  key -- section name, value -- section idx in secInfos; 
         self.symInfos = {} 
@@ -70,6 +72,31 @@ class CModuleConverter():
     def compile(self, srcfn):
         raise Exception('please implement this function ' )
 
+    def run(self, srcfn, tagfn):
+        self.source = open(srcfn).read()
+        self.compile(srcfn)
+        binary = lief.parse(open(self.objfn,'rb'))
+        self.updateSecInfos(binary)
+        self.updateSymbolInfos(binary)
+        self.updateRelocInfos(binary)
+        # save bs for debug   
+        self.outputTypescript(tagfn)
+
+    def outputTypescript(self, fn):
+        assert self.templateFn!=None, 'please provide  a valid template file name' 
+        t = Template(open(self.templateFn).read())
+        s = t.render(
+            source      = self.source.splitlines(),
+            secInfos    = self.secInfos      ,
+            secMap      = self.secMap        ,
+            symInfos    = self.symInfos      ,
+            relocInfos  = self.relocInfos    ,
+            gotInfo     = self.gotInfo       ,
+            bs          = self.bs            ,
+            hexBsLenString =hex(len(self.bs)), 
+        )
+        open(fn,'w').write(s)
+        
     def updateSecInfos(self,binary): # realloc self.bs too
         # write obj byte blocks
         offset = 0; bs=bytes()
@@ -78,7 +105,7 @@ class CModuleConverter():
         secInfos = []
         secMap = {}
         for k, sec in enumerate(binary.sections):
-            newSecInfo = {'sec':sec,'offset':None} # offset is None means this section not be loaded
+            newSecInfo = {'offset':None} # offset is None means this section not be loaded
             secMap[sec.name] = k;
             offset=len(bs)
             if  sec.type == lief.ELF.SECTION_TYPES.PROGBITS \
@@ -96,12 +123,12 @@ class CModuleConverter():
         gotInfo = {'offset':offset, 'symbols':{}}
         gotSymOffset = 0;
         for k, symbol in enumerate(binary.symbols):
+            if symbol.name ==  '': continue # skip empty name 
             if symbol.shndx != int(lief.ELF.SYMBOL_SECTION_INDEX.UNDEF): continue # only handle undef  symbols
-            gotInfo['symbols'][symbol.name] = gotSymOffset
+            gotInfo['symbols'][symbol.name] = {'offset':gotSymOffset} # this offset is related to got area itself, not for bs
             bs+=b'\0'*4; gotSymOffset+=4;
         offset = len(bs); n_offset = getAlignNum(offset)
         if n_offset > offset: bs+= b'\0' *(n_offset-offset)
-        
         self.bs = bytearray(bs)
         self.secInfos = secInfos;
         self.secMap   = secMap;
@@ -124,50 +151,31 @@ class CModuleConverter():
     def updateRelocInfos(self, binary):
         raise Exception('please implement this function ' )
 
-    def initBytes(self):
-        '''
-            this function do the following tasks
-            a. put all data need to load to a bytes variable 
-            b. handle  all  independent relocs, 
-            c. generates a symbol map, only can record offset now, because can not determine the start address now
-        '''
-        binary = lief.parse(open(self.objfn,'rb'))
-        self.updateSecInfos(binary)
-        self.updateSymbolInfos(binary)
-        self.updateRelocInfos(binary)
-
     def generateTSModule(self):
         raise Exception('please implement this function ' )
 
 
 class ThumbCModuleConverter(CModuleConverter):
-    compiler='arm-linux-gnueabihf-gcc'
-    compile_flag = ' -mlong-calls '
 
     def __init__(self):
         super().__init__()
+        self.compiler='arm-linux-gnueabihf-gcc'
 
-    def compile(self, srcs):
+        self.compile_flag = ' -mlong-calls '
+        moudle_path = os.path.dirname(os.path.abspath(__file__))
+        self.templateFn = os.path.join(moudle_path, 'fun.arm32.thumb.jinjia')
+
+    def compile(self, srcfn):
         # only compile to a object file, never link
-        if isinstance(srcs, list):
-            # create a big cpp file for compile to object file 
-            TEMP_SRC='/tmp/__final.cpp'
-            with open(TEMP_SRC,'w') as f:
-                for s in srcs: f.write(open(s).read())
-            cmd = f'{ThumbCModuleConverter.compiler} -c -I. {ThumbCModuleConverter.compile_flag} -o  {self.objfn} -mthumb {TEMP_SRC}'
-        elif isinstance(srcs, str):
-            cmd = f'{ThumbCModuleConverter.compiler} -c -I. {ThumbCModuleConverter.compile_flag} -o  {self.objfn} -mthumb {srcs}'
-        else:
-            assert False, "srcs only can be of type list and str "
+        cmd = f'{self.compiler} -c -I. {self.compile_flag} -o  {self.objfn} -mthumb {srcfn}'
         print(runCmd(cmd, mustOk=True))
-
-        relocInfos = []
 
     def updateRelocInfos(self, binary):
         print('handle relocs')
+        bs = bytearray(self.bs) # need to change bs
         relocInfos = []
         for k, reloc in enumerate(binary.relocations):
-            newReloc = {'reloc':reloc, "handle":False}
+            newReloc = {"handle":False}
             secIdx = self.secMap[reloc.section.name]
             sec    = self.secInfos[secIdx]
             symbolName  = reloc.symbol.name
@@ -177,34 +185,105 @@ class ThumbCModuleConverter(CModuleConverter):
             if False: pass
             elif typ == 3: # R_ARM_REL32 # ((S + A) | T) | - P
                 A = offset;
-                P = struct.unpack('I',self.bs[offset:offset+4])[0]
+                P = struct.unpack('I',bs[offset:offset+4])[0]
                 secIdx = reloc.info
                 S = self.secInfos[secIdx]['offset']
-                W = S+A-P
-                self.bs[offset:offset+4] = struct.pack('I', W)
+                W = S-A+P
+                bs[offset:offset+4] = struct.pack('I', W)
                 newReloc['handle'] = True
             elif typ == 10: # R_ARM_THM_CAL # ((S + A) | T) - P
-                if symbolName in self.symInfos:
-                    newReloc['handle'] = True # do nothing
-                else:
-                    assert False, f' please handle reloc {reloc} {reloc.type}'
+                assert symbolName in self.symInfos, f'can not found symbol {symbolName} '
+                # insert a BL code 
+                ks = Ks(KS_ARCH_ARM, KS_MODE_THUMB)
+                symbolOffset = self.symInfos[symbolName]['offset']
+                encoding, count = ks.asm(f'BL #{hex(symbolOffset)}', offset)
+                bs[offset:offset+4]=bytes(encoding)
+                newReloc['handle'] = True # do nothing
             elif typ == 25: #R_ARM_BASE_PREL: # B(S) + A - P
                 assert symbolName in self.gotInfo['symbols'], f'can not find symbol {symbolName} in got'
-                BS= self.gotInfo['offset'] + self.gotInfo['symbols'][symbolName]
-                P = struct.unpack('I',self.bs[offset:offset+4])[0]
+                BS= self.gotInfo['offset'] + self.gotInfo['symbols'][symbolName]['offset']
+                P = struct.unpack('I',bs[offset:offset+4])[0]
                 A = offset;
-                W = BS+A-P
-                self.bs[offset:offset+4] = struct.pack('I', W)
+                W = BS-A+P
+                bs[offset:offset+4] = struct.pack('I', W)
                 newReloc['handle'] = True
             elif typ == 26: # R_ARM_GOT_BREL # GOT(S) + A - GOT_ORG
                 A = offset;
                 assert symbolName in self.gotInfo['symbols'], f'can not found symbol {symbolName} in got '
-                W = self.gotInfo['symbols'][symbolName]
-                self.bs[offset:offset+4] = struct.pack('I', W)
+                W = self.gotInfo['symbols'][symbolName]['offset']
+                bs[offset:offset+4] = struct.pack('I', W)
                 newReloc['handle'] = True
             else:
                 assert False, f' please handle reloc {reloc} {reloc.type}'
             relocInfos.append(newReloc)
+        self.bs = bs; # write back 
+        self.relocInfos = relocInfos
+
+    def generateTSModule(self):
+        raise Exception('please implement this function ' )
+    
+
+class ARMCModuleConverter(CModuleConverter):
+
+    def __init__(self):
+        super().__init__()
+        self.compiler='arm-linux-gnueabihf-gcc'
+        self.compile_flag = ' -mlong-calls '
+        moudle_path = os.path.dirname(os.path.abspath(__file__))
+        self.templateFn = os.path.join(moudle_path, 'fun.arm32.jinjia')
+
+    def compile(self, srcfn):
+        # only compile to a object file, never link
+        cmd = f'{self.compiler} -c -I. {self.compile_flag} -o  {self.objfn} -marm {srcfn}'
+        print(runCmd(cmd, mustOk=True))
+
+    def updateRelocInfos(self, binary):
+        print('handle relocs')
+        bs = bytearray(self.bs) # need to change bs
+        relocInfos = []
+        for k, reloc in enumerate(binary.relocations):
+            newReloc = {"handle":False}
+            secIdx = self.secMap[reloc.section.name]
+            sec    = self.secInfos[secIdx]
+            symbolName  = reloc.symbol.name
+            if sec['offset'] == None: continue # section not be loaded
+            offset   = sec['offset'] + reloc.address
+            typ         = int(reloc.type)
+            if False: pass
+            elif typ == 3: # R_ARM_REL32 # ((S + A) | T) | - P
+                A = offset;
+                P = struct.unpack('I',bs[offset:offset+4])[0]
+                secIdx = reloc.info
+                S = self.secInfos[secIdx]['offset']
+                W = S-A+P
+                bs[offset:offset+4] = struct.pack('I', W)
+                newReloc['handle'] = True
+            elif typ == 25: #R_ARM_BASE_PREL: # B(S) + A - P
+                assert symbolName in self.gotInfo['symbols'], f'can not find symbol {symbolName} in got'
+                BS= self.gotInfo['offset'] + self.gotInfo['symbols'][symbolName]['offset']
+                P = struct.unpack('I',bs[offset:offset+4])[0]
+                A = offset;
+                W = BS-A+P
+                bs[offset:offset+4] = struct.pack('I', W)
+                newReloc['handle'] = True
+            elif typ == 26: # R_ARM_GOT_BREL # GOT(S) + A - GOT_ORG
+                A = offset;
+                assert symbolName in self.gotInfo['symbols'], f'can not found symbol {symbolName} in got '
+                W = self.gotInfo['symbols'][symbolName]['offset']
+                bs[offset:offset+4] = struct.pack('I', W)
+                newReloc['handle'] = True
+            elif typ == 28: # R_ARM_CALL #
+                assert symbolName in self.symInfos, f'can not found symbol {symbolName} '
+                # insert a BL code 
+                ks = Ks(KS_ARCH_ARM, KS_MODE_ARM)
+                symbolOffset = self.symInfos[symbolName]['offset']
+                encoding, count = ks.asm(f'BL #{hex(symbolOffset)}', offset)
+                bs[offset:offset+4]=bytes(encoding)
+                newReloc['handle'] = True # do nothing
+            else:
+                assert False, f' please handle reloc {reloc} {reloc.type}'
+            relocInfos.append(newReloc)
+        self.bs = bs; # write back 
         self.relocInfos = relocInfos
 
     def generateTSModule(self):
@@ -291,10 +370,14 @@ def main():
     return 
 
 def main():
-    converter = ThumbCModuleConverter();
-    converter.compile('fun0.cpp')
-    converter.initBytes()
-
+    converter = ARMCModuleConverter();
+    #converter = ThumbCModuleConverter();
+    converter.run('fun0.cpp', 'fun0.ts')
+    for k, v in converter.symInfos.items():
+        print(k, hex(v['offset']))
+    print('bslen', hex(len(converter.bs)))
+    # write for debug 
+    open('/tmp/ff.bin','wb').write(converter.bs)
 
 if __name__ == '__main__':
     main()

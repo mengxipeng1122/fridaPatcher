@@ -1,6 +1,6 @@
 import * as fridautils from './fridautils'
-import * as hook from './hook0'
 import * as path from 'path'
+import * as fun0 from  './fun0'
 
 const fs = require('frida-fs');
 
@@ -135,6 +135,85 @@ var test0 = function() {
     
 }
 
+var test0 = function() {
+    const code = fun0.makeCode( 
+        new Map<string, NativePointer>([
+        ["frida_log", new NativeCallback(
+            (s)=>{
+                const ss = s.readUtf8String();
+                console.log(ss)
+            },'void', ['pointer']
+        ), ],
+    ])
+    );
+    fridautils.dumpMemory(code.buffer);
+
+    // for( var i = 0;i<20; i++) {
+    //     const addr = code.symbols.test0.sub(1).add(i*4);
+    //     console.log(addr)
+    //     fridautils.dumpMemory(addr, 4);
+    //     var inst = Instruction.parse(addr).toString();
+    //     console.log(addr, inst)
+    // }
+
+    const test0_fun = new NativeFunction(code.symbols.test0, 'void', []);
+    test0_fun();
+}
+
+var test0 = function(){
+    const cm = new CModule(`
+#include <stdio.h>
+
+void hello(void) {
+  printf("Hello World from CModule\\n");
+}
+`);
+
+console.log(JSON.stringify(cm));
+console.log(cm.hello)
+
+    // const baseAddr = cm.hello;
+    // for( var i = 0;i<20; i++) {
+    //     const addr = baseAddr.add(i*4);
+    //     console.log(addr)
+    //     fridautils.dumpMemory(addr, 4);
+    //     var inst = Instruction.parse(addr).toString();
+    //     console.log(addr, inst)
+    // }
+
+
+const hello = new NativeFunction(cm.hello, 'int', []);
+hello();
+
+}
+
+var test0 = function() {
+    const frida_log_fun = new NativeCallback( (s)=>{
+                const ss = s.readUtf8String();
+                console.log(ss)
+            },'void', ['pointer']);
+    console.log('frida_log_fun', frida_log_fun);
+    const code = fun0.makeCode( 
+        new Map<string, NativePointer>([
+        ["frida_log", frida_log_fun ],
+    ])
+    );
+    console.log("code.buffer", code.buffer, code.bufferLength)
+    fridautils.dumpMemory(code.buffer);
+    fridautils.dumpMemoryToFile(code.buffer, code.bufferLength,'/storage/emulated/0/aa.bin' );
+    console.log("code.symbols.test0", code.symbols.test0);
+
+    // for( var i = 0;i<20; i++) {
+    //     const addr = code.symbols.test0.add(i*4);
+    //     console.log(addr)
+    //     fridautils.dumpMemory(addr, 4);
+    //     var inst = Instruction.parse(addr).toString();
+    //     console.log(addr, inst)
+    // }
+
+    const test0_fun = new NativeFunction(code.symbols.test0, 'int', []);
+    test0_fun();
+}
 
 console.log('hello world')
 test0()

@@ -1,0 +1,100 @@
+
+////////////////////////////////////////////////////////////////////////////////
+// this is a file  for frida in typescript 
+// 
+
+////////////////////////////////////////////////////////////////////////////////
+// c source code                  
+{% for l in cCode %} 
+// {{l}} {% endfor  %}
+
+let jump16InstrMaxOffset=0x800000;
+
+function alignNum(n:number, align:number){
+    return Math.floor((n+align-1)/align) *align
+}
+
+function typedArrayToBuffer(array: Uint8Array): ArrayBuffer {
+    return array.buffer.slice(array.byteOffset, array.byteLength + array.byteOffset) as ArrayBuffer
+}
+
+
+function putImmToMovRegInstrThumb(u:number, addr:NativePointer){
+    let b0 = (u>>0x00) &0xf
+    let b1 = (u>>0x04) &0xf
+    let b2 = (u>>0x08) &0x7
+    let b3 = (u>>0x0b) &0x1
+    let b4 = (u>>0x0c) &0xf
+    let ob = addr.readU32() >>>0
+    ob &= 0x8f00fbf0
+    ob |= (b0) << 0x10
+    ob |= (b1) << 0x14
+    ob |= (b2) << 0x1c
+    ob |= (b3) << 0x0a
+    ob |= (b4) << 0x00
+    ob >>>=0
+    addr.writeU32(ob)
+}
+
+function getJumpOffset(src:NativePointer, tag:NativePointer):number{
+    let srcInt = src.toInt32();
+    let tagInt = tag.toInt32();
+    return tagInt-srcInt;
+}
+
+
+function getSymbolAddress(symbol:string):NativePointer{
+    let address = Module.getExportByName(null, symbol);
+    return address;
+}
+
+export var makeCode = ( externalSymbols?: Map<string, NativePointer>| undefined )=> {
+
+
+    // allocate a buffer for store bs
+    const bs = new Uint8Array([ {% for n in bs %} {{n}}, {% endfor  %} ]);
+    const bsLen = {{hexBsLenString}};
+    let allocLen = alignNum(bsLen, Process.pageSize);
+    const buffer = Memory.alloc( allocLen);
+    Memory.protect(buffer, allocLen, 'rwx');
+    buffer.writeByteArray(typedArrayToBuffer(bs));
+
+    // hot link 
+    // write got area
+    {% for k,v in gotInfo["symbols"].items() %} 
+    try{
+        var resolved = false;
+        if(!resolved){
+            if(externalSymbols != undefined){
+                const address  = externalSymbols.get("{{k}}");
+                if(address !=null) {
+                    buffer.add({{ gotInfo["offset"] }} + {{v['offset']}} ).writePointer(address);
+                    resolved = true;
+                }
+            }
+        }
+        if(!resolved){
+            buffer.add({{ gotInfo["offset"] }} + {{v['offset']}} ).writePointer(Module.getExportByName(null, "{{k}}"));
+        }
+    }
+    catch(_e){
+        let e:Error= _e; 
+        let result = e.message;
+        console.log("get address for {{k}} failed with error " +  `${result}`);
+    }
+    {% endfor  %}
+
+    Memory.protect(buffer, allocLen, 'r-x');
+    return {
+        buffer : buffer, 
+        bufferLength : bsLen,
+        symbols: {
+    {% for k,v in symInfos.items() %} 
+        {{k  }}: buffer.add({{v["offset"]}}),
+    {% endfor %}
+            },
+    } ;
+
+}
+
+        
