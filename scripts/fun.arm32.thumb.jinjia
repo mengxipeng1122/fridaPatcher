@@ -10,6 +10,13 @@
 
 let jump16InstrMaxOffset=0x800000;
 
+function checkArch(){
+    if(Process.arch != 'arm'){
+        throw "not arm arch, please check";
+    }
+}
+
+
 function alignNum(n:number, align:number){
     return Math.floor((n+align-1)/align) *align
 }
@@ -49,6 +56,8 @@ function getSymbolAddress(symbol:string):NativePointer{
 }
 
 export var makeCode = ( externalSymbols?: Map<string, NativePointer>| undefined )=> {
+
+    checkArch();
 
 
     // allocate a buffer for store bs

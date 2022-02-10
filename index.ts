@@ -188,29 +188,26 @@ hello();
 }
 
 var test0 = function() {
+    // _Z10bt_decryptPhPm address
+    var bt_decrypt_ptr=null;
+    Process.getModuleByName("libgame.so")
+        .enumerateExports()
+        .filter(e=>{return e.name.includes('bt_decrypt'); })
+        .forEach(e=>{bt_decrypt_ptr=e.address;});
+    console.log('bt_decrypt_ptr', bt_decrypt_ptr);
+    if(bt_decrypt_ptr==null) throw " can not found bt_decrypt_ptr ";
     const frida_log_fun = new NativeCallback( (s)=>{
                 const ss = s.readUtf8String();
                 console.log(ss)
             },'void', ['pointer']);
-    console.log('frida_log_fun', frida_log_fun);
     const code = fun0.makeCode( 
         new Map<string, NativePointer>([
         ["frida_log", frida_log_fun ],
+        ["_Z10bt_decryptPhPm", bt_decrypt_ptr ],
     ])
     );
     console.log("code.buffer", code.buffer, code.bufferLength)
     fridautils.dumpMemory(code.buffer);
-    fridautils.dumpMemoryToFile(code.buffer, code.bufferLength,'/storage/emulated/0/aa.bin' );
-    console.log("code.symbols.test0", code.symbols.test0);
-
-    // for( var i = 0;i<20; i++) {
-    //     const addr = code.symbols.test0.add(i*4);
-    //     console.log(addr)
-    //     fridautils.dumpMemory(addr, 4);
-    //     var inst = Instruction.parse(addr).toString();
-    //     console.log(addr, inst)
-    // }
-
     const test0_fun = new NativeFunction(code.symbols.test0, 'int', []);
     test0_fun();
 }

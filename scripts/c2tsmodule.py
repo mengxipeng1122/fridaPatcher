@@ -370,12 +370,9 @@ def main():
     return 
 
 def main():
-    converter = ARMCModuleConverter();
-    #converter = ThumbCModuleConverter();
+    #converter = ARMCModuleConverter();
+    converter = ThumbCModuleConverter();
     converter.run('fun0.cpp', 'fun0.ts')
-    for k, v in converter.symInfos.items():
-        print(k, hex(v['offset']))
-    print('bslen', hex(len(converter.bs)))
     # write for debug 
     open('/tmp/ff.bin','wb').write(converter.bs)
 
