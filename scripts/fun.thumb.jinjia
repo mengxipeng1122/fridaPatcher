@@ -55,6 +55,8 @@ function getSymbolAddress(symbol:string):NativePointer{
     return address;
 }
 
+export const allocatedBuffer:NativePointer[] =[];
+
 export var makeCode = ( externalSymbols?: Map<string, NativePointer>| undefined )=> {
 
     checkArch();
@@ -94,6 +96,8 @@ export var makeCode = ( externalSymbols?: Map<string, NativePointer>| undefined 
     {% endfor  %}
 
     Memory.protect(buffer, allocLen, 'r-x');
+
+    allocatedBuffer.push(buffer); // always store the alloced buffer ptr, avoid it will be free when hook code try to call it 
     return {
         buffer : buffer, 
         bufferLength : bsLen,
@@ -105,6 +109,7 @@ export var makeCode = ( externalSymbols?: Map<string, NativePointer>| undefined 
     } ;
 
 }
+
 
 type HookOption = {
     pos: NativePointer;
@@ -124,35 +129,68 @@ export var hookCode = ( hookOptions:HookOption[], externalSymbols?: Map<string, 
         console.log(JSON.stringify(h));
         const allocLen = Process.pageSize;
         // add pumded code for hooks;
-        const buffer = Memory.alloc(allocLen, {near:h.pos,maxDistance:jump16InstrMaxOffset}); //  always near jump
+        let nearjump = true;
+        let buffer;
+        try{
+            buffer = Memory.alloc(allocLen, {near:h.pos,maxDistance:jump16InstrMaxOffset}); //  always near jump
+        }
+        catch(_e){
+            console.log('can not alloc near to pos,  use long jump ')
+            buffer = Memory.alloc(allocLen);
+            nearjump = false;
+        }
+        allocatedBuffer.push(buffer); // always store the alloced buffer ptr, avoid it will be free when hook code try to call it 
         hooks.push({
                 buffer:buffer,
                 pos:h.pos,
             });
         Memory.protect(buffer, allocLen, 'rwx');
-        const bs = new Uint8Array([ {% for n in hookInfo['INST'] %} {{n}}, {% endfor  %} ]);
-        buffer.writeByteArray(typedArrayToBuffer(bs));
+        {
+            const bs = new Uint8Array([ {% for n in hookInfo['INST'] %} {{n}}, {% endfor  %} ]);
+            buffer.writeByteArray(typedArrayToBuffer(bs));
+        }
         {
             let funaddr = code.symbols.get(h.fun);
             if(funaddr!=null){ buffer.add( {{ hookInfo['funOffset'] }} ).writePointer(funaddr); }
             else{ throw `can not get address of fun "${h.fun}"` }
         }
-        {
-            buffer.add(  {{ hookInfo['originCodeOffset'] }} ).writeU32( h.pos.readU32());
+        if(nearjump){
+            {
+                buffer.add(  {{ hookInfo['backAddressOffset'] }} ).writePointer(h.pos.add(4));
+            }
+
+            {
+                buffer.add(  {{ hookInfo['originCodeOffset'] }} ).writeU32( h.pos.sub(1).readU32());
+            }
+            {
+                // put jump code at original addr
+                const addr = h.pos;
+                Memory.protect(addr.sub(1), 4, 'rwx');
+                let writer = new ThumbWriter(addr.sub(1))
+                writer.putBImm(buffer);
+                writer.flush()
+                Memory.protect(addr.sub(1), 4, 'r-x');
+            }
+            
         }
-        {
-            buffer.add(  {{ hookInfo['backAddressOffset'] }} ).writePointer(h.pos.add(4));
+        else {
+            {
+                buffer.add(  {{ hookInfo['backAddressOffset'] }} ).writePointer(h.pos.add(8));
+            }
+            {
+                buffer.add(  {{ hookInfo['originCodeOffset'] }} ).add(0).writeU32( h.pos.sub(1).add(0).readU32());
+                buffer.add(  {{ hookInfo['originCodeOffset'] }} ).add(4).writeU32( h.pos.sub(1).add(4).readU32());
+            }
+            {
+                // put jump code at original addr
+                const addr = h.pos;
+                Memory.protect(addr.sub(1), 8, 'rwx');
+                const bs = new Uint8Array([ {% for n in hookInfo['longJumpINST'] %} {{n}}, {% endfor  %} ]);
+                addr.sub(1).add( 0x00 ).writeByteArray(typedArrayToBuffer(bs));
+                addr.sub(1).add( {{hookInfo['longJumpOffset'] }} ).writePointer(buffer.add(1));
+                Memory.protect(addr.sub(1), 8, 'r-x');
+            }
         }
-        {
-            // put jump code at original addr
-            const addr = h.pos;
-            Memory.protect(addr, 4, 'rwx');
-            let writer = new ArmWriter(addr)
-            writer.putBImm(buffer);
-            writer.flush()
-            Memory.protect(addr, 4, 'r-x');
-        }
-        //
         Memory.protect(buffer, allocLen, 'r-x');
     });
     return {code:code, hooks:hooks};
