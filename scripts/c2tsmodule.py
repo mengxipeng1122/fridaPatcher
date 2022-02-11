@@ -20,7 +20,6 @@ from ArmCModuleConverter import *
 def main():
     converter = ThumbCModuleConverter();
     converter.run('hook0.cpp', 'hook0.ts')
-    pass
     # write for debug 
     open('/tmp/ff.bin','wb').write(converter.bs)
 
