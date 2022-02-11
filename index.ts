@@ -274,9 +274,43 @@ var test0 = function(){
     dumpInfos.push({p:code.buffer, n:code.bufferLength});
 
     dumpToSDcard(dumpInfos);
+}
+var test0=()=>{
+    var hookptr= Module.getExportByName('libBlue.so', '_ZN18VuAssetFactoryImpl9loadAssetEPK15VuAssetTypeInfoP9VuAssetDBP7VuAsset');
 
+    let isThumbAddress = (hookptr.toUInt32()&0x1)==0x01;
+    console.log('hookptr', hookptr, isThumbAddress);
+    
 }
 
+var test0=()=>{
+    let code = hook0.makeCode(new Map<string,NativePointer>([
+        ['frida_log', frida_log_fun],
+    ]));
+    let fun_ptr = code.symbols.get('dumpSelfMap');
+    console.log('fun_ptr', fun_ptr);
+    if(fun_ptr!=null){
+        fridautils.dumpMemory(fun_ptr.sub(1));
+        let fun = new NativeFunction(fun_ptr, 'void',[]);
+        fun();
+        console.log(fun_ptr, 'fun call ok');
+        hook0.allocatedBuffer.forEach(e=>{
+            console.log(e)
+        });
+    }
+};
+
+var test0 = function() {
+    var hookptr= Module.getExportByName('libBlue.so', '_ZN18VuAssetFactoryImpl9loadAssetEPK15VuAssetTypeInfoP9VuAssetDBP7VuAsset');
+
+    let {code, hooks} = hook0.hookCode( [
+            { pos:hookptr.add(0x24), fun: 'test0'},
+        ],
+        new Map<string, NativePointer>([
+            ["frida_log", frida_log_fun ],
+        ]),
+    );
+}
 
 console.log('hello world')
 test0()
