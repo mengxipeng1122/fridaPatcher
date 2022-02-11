@@ -15,6 +15,24 @@ const test_log_fun = new NativeCallback(() =>{
             console.log('test called')
         },'void', []);
 //const test_log_fun_fun= new NativeFunction(test_log_fun, 'void', []);
+let dumpToSDcard=(dumpInfos: any[])=>
+    {
+        dumpInfos.forEach(d=>{
+            let addr = d.p;
+            let le = d.n;
+            let fn = "/mnt/sdcard/"+addr+'.dump'
+            fridautils.dumpMemoryToFile(addr, le, fn);
+        })
+        {
+            let s = JSON.stringify(dumpInfos);
+            let n = s.length;
+            let sbuf=Memory.allocUtf8String(s);
+            fridautils.dumpMemory(sbuf, 0x80);
+            console.log('n',ptr(n));
+            let fn = "/mnt/sdcard/dumpInfos.json"
+            fridautils.dumpMemoryToFile(sbuf, n, fn);
+        }
+    }
 
 var test0 = function() {
     var hookptr= Module.getExportByName('libBlue.so', '_ZN18VuAssetFactoryImpl9loadAssetEPK15VuAssetTypeInfoP9VuAssetDBP7VuAsset');
@@ -223,12 +241,42 @@ var test0 = function() {
             fridautils.dumpMemoryToFile(sbuf, n, fn);
         }
     }
+}
 
-
-
-    
+var test0 = function() {
+    let fun_ptr = Module.findExportByName(null, '__android_log_print');
+    console.log('fun', fun_ptr);
+    if(fun_ptr!=null){
+        let fun = new NativeFunction(fun_ptr,'int',['int','pointer', 'pointer'] );
+        console.log('fun', fun);
+        let s0 = Memory.allocUtf8String("MyTest");
+        let s1 = Memory.allocUtf8String("haha");
+        let ret = fun(3,s0,s1);
+        console.log('ret', ret);
+    }
 
 }
+
+var test0 = function(){
+    var hookptr= Module.getExportByName('libBlue.so', '_ZN18VuAssetFactoryImpl9loadAssetEPK15VuAssetTypeInfoP9VuAssetDBP7VuAsset');
+    let {code, hooks} = hook0.hookCode( [
+            { pos:hookptr.add(0x24), fun: 'test0'},
+        ],
+        new Map<string, NativePointer>([
+                ["frida_log", frida_log_fun ],
+        ]),
+    );
+    let dumpInfos = [];
+    hooks.forEach(h=>{
+        dumpInfos.push({p:h.pos.sub(1), n:0x10});
+        dumpInfos.push({p:h.buffer, n:0x100});
+    })
+    dumpInfos.push({p:code.buffer, n:code.bufferLength});
+
+    dumpToSDcard(dumpInfos);
+
+}
+
 
 console.log('hello world')
 test0()
