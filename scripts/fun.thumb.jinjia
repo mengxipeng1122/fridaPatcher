@@ -119,26 +119,39 @@ type HookInfo ={
     pos:NativePointer, 
 };
 
-export var hookCode = ( hookOptions:HookOption[], externalSymbols?: Map<string, NativePointer>| undefined )=> {
-    const code = makeCode(externalSymbols);
-    const hooks:HookInfo[]=[];
+export var hookCode = ( hookOptions:HookOption[], externalSymbols?: Map<string, NativePointer>| undefined, forceFarJump?:boolean|undefined )=> {
+
+    let code = makeCode(externalSymbols);
+    let hooks:HookInfo[]=[];
+    forceFarJump = forceFarJump != undefined ? forceFarJump : false;
     hookOptions.forEach(h=>{
         // add hooks
         console.log(JSON.stringify(h));
         if ((h.pos.toUInt32()&0x1)!=0x1) {
             throw "hook pos is not correct, it is not a valid Thumb address ";
         };
-        const allocLen = Process.pageSize;
+        let allocLen = Process.pageSize;
         // add pumded code for hooks;
-        let nearjump = true;
         let buffer;
-        try{
-            buffer = Memory.alloc(allocLen, {near:h.pos,maxDistance:jump16InstrMaxOffset});
-        }
-        catch(_e){
-            console.log('can not alloc near to pos,  use long jump ')
+
+        let nearjump;
+
+        if(forceFarJump){
             buffer = Memory.alloc(allocLen);
             nearjump = false;
+        }
+        else{
+            try{
+                buffer = Memory.alloc(allocLen, {near:h.pos,maxDistance:jump16InstrMaxOffset});
+                nearjump=true;
+            }
+            catch(_e){
+                buffer = Memory.alloc(allocLen);
+                nearjump = false;
+            }
+        }
+        if(nearjump){
+            console.log('use long jump ')
         }
         allocatedBuffer.push(buffer); // always store the alloced buffer ptr, avoid it will be free when hook code try to call it 
         hooks.push({
@@ -175,7 +188,7 @@ export var hookCode = ( hookOptions:HookOption[], externalSymbols?: Map<string, 
             
         }
         else {
-            if ((h.pos.toUInt32()&0x2)!=0x1) {
+            if ((h.pos.toUInt32()&0x3)!=0x1) {
                 throw "hook pos is not correct, it is not a valid Thumb address, and use long jump";
             }
 

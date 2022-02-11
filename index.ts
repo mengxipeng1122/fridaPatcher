@@ -309,7 +309,9 @@ var test0 = function() {
         new Map<string, NativePointer>([
             ["frida_log", frida_log_fun ],
         ]),
+        true,
     );
+
 }
 
 console.log('hello world')
