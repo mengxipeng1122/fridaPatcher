@@ -12,7 +12,6 @@ var test0 = ()=>{
     let show=false;
     let dumped = false;
     let hooks:InvocationListener[] = [];
-    // find open memory function
     fridautils.hookRegisterNatives("com.netease.nis.wrapper.MyJni", new Map([
         ["load", {
             onEnter:(args)=>{
@@ -26,9 +25,7 @@ var test0 = ()=>{
                 ];
                 hook0.hookCode(hooks,new Map<string, NativePointer>([
                     ["frida_log", frida_log_callback],
-                ]))
-
-                
+                ]),true)
             },
             onLeave:(retval)=>{
                 console.log('leave load');

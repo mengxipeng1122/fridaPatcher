@@ -1,5 +1,7 @@
 
 #include <stdio.h>
+#include <ctype.h>
+#include <string.h>
 
 #if 1
 #define LOG_INFOS(fmt, args...)                                       \
@@ -41,10 +43,39 @@ static int test1(){
     
     return 11;
 }
-extern "C" void test0()
+static void hexdump(void *ptr, int buflen) {
+  unsigned char *buf = (unsigned char*)ptr;
+  int i, j;
+  char line[0x200];
+  size_t offset = 0;
+  for (i=0; i<buflen; i+=16) {
+      sprintf(line+offset,"%06x: ", i); offset = strlen(line);
+      for (j=0; j<16; j++)
+      {
+          if (i+j < buflen)
+              sprintf(line+offset,"%02x ", buf[i+j]);
+          else
+              sprintf(line+offset,"     ");
+          offset= strlen(line);
+      }
+      sprintf(line+offset," "); offset= strlen(line);
+      for (j=0; j<16; j++)
+      {
+          if (i+j < buflen)
+          {
+              sprintf(line+offset,"%c", isprint(buf[i+j]) ? buf[i+j] : '.');
+              offset= strlen(line);
+          }
+      }
+      LOG_INFOS("%s",line);
+      offset = 0;
+  }
+}
+
+extern "C" void test0(void* sp)
 {
-    test1();
-    LOG_INFOS("call 1");
+    LOG_INFOS(" sp %p", sp);
+    hexdump(sp, 0x200);
     return ;
 }
 

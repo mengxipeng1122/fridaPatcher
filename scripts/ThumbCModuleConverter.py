@@ -25,32 +25,34 @@ class ThumbCModuleConverter(CModuleConverter):
         self.ks = Ks(KS_ARCH_ARM, KS_MODE_THUMB)
         self.md = Cs(CS_ARCH_ARM, CS_MODE_THUMB)
         hookCODE= '''
-                    PUSH \t {LR};                                            @0x0: 
-                    PUSH \t {R0-R7};                                         @0x2: 
-                    PUSH \t {R8-R12};                                        @0x4: 
-                    MRS  \t LR, CPSR;                                        @0x8: 
-                    PUSH \t {LR};                                            @0xc: 
-                    ADD  \t R4,  PC, #0x40                                   @0xe: 
-                    LDR  \t R4, [R4]                                         @0x12:
-                    BLX  \t R4; @ call fun                                   @0x14:
-                    POP  \t {LR};                                            @0x16:
-                    MSR  \t CPSR, LR;                                        @0x1a:
-                    POP  \t {R8-R12};                                        @0x1e:
-                    POP  \t {R0-R7};                                         @0x22:
-                    POP  \t {LR};                                            @0x24:
-                    NOP  \t ;  @ write origin code                           @0x28:
-                    NOP  \t ;                                                @0x2a:
-                    NOP  \t ;                                                @0x2c:
-                    NOP  \t ;                                                @0x2e:
-                    LDR  \t PC, [PC, #-0x00]                                 @0x30:
-                    NOP  \t ;  @ write jump back address                     @0x34:
-                    NOP  \t ;                                                @0x38:
-                    NOP  \t ;                                                @0x3a:
-                    NOP  \t ;                                                @0x3e:
-                    NOP  \t ;  @ write call fun address                      @0x40:
-                    NOP  \t ;                                                @0x42:
-                    NOP  \t ;                                                @0x3c:
-                    NOP  \t ;                                                @0x3e:
+                    PUSH \t {LR};                                            @0x0:	
+                    PUSH \t {R0-R7};                                         @0x2:	
+                    PUSH \t {R8-R12};                                        @0x4:	
+                    MRS  \t LR, CPSR;                                        @0x8:	
+                    PUSH \t {LR};                                            @0xc:	
+                    ADD  \t R4,  PC, #0x40                                   @0xe:	
+                    LDR  \t R4, [R4]                                         @0x12:	
+                    NOP  \t ;                                                @0x14:	
+                    MOV  \t R0, SP @ pass sp to function                     @0x16:	
+                    BLX  \t R4; @ call fun                                   @0x18:	
+                    POP  \t {LR};                                            @0x1a:	
+                    MSR  \t CPSR, LR;                                        @0x1e:	
+                    POP  \t {R8-R12};                                        @0x22:	
+                    POP  \t {R0-R7};                                         @0x26:	
+                    POP  \t {LR};                                            @0x28:	
+                    NOP  \t ;  @ write origin code                           @0x2c:	
+                    NOP  \t ;                                                @0x2e:	
+                    NOP  \t ;                                                @0x30:	
+                    NOP  \t ;                                                @0x32:	
+                    LDR  \t PC, [PC, #-0x00]                                 @0x34:	
+                    NOP  \t ;  @ write jump back address                     @0x38:	
+                    NOP  \t ;                                                @0x3a:	
+                    NOP  \t ;                                                @0x3c:	
+                    NOP  \t ;                                                @0x3e:	
+                    NOP  \t ;  @ write call fun address                      @0x40:	
+                    NOP  \t ;                                                @0x42:	
+                    NOP  \t ;                                                @0x44:	
+                    NOP  \t ;                                                @0x46:	
             '''
         encoding, count = self.ks.asm(hookCODE);
         # 
@@ -68,8 +70,8 @@ class ThumbCModuleConverter(CModuleConverter):
         self.hookInfo={
                 'INST':              hookINST,
                 'funOffset'         :0x40,
-                'originCodeOffset'  :0x28,
-                'backAddressOffset' :0x34,
+                'originCodeOffset'  :0x2c,
+                'backAddressOffset' :0x38,
                 'longJumpINST'      :longJumpINST,
                 'longJumpOffset'    :0x04,
                 };
