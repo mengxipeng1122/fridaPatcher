@@ -109,12 +109,12 @@ export var makeCode = ( externalSymbols?: Map<string, NativePointer>| undefined 
 }
 
 
-type HookOption = {
+export type HookOption = {
     pos: NativePointer;
     fun: string;
 };
 
-type HookInfo ={
+export type HookInfo ={
     buffer:NativePointer,
     pos:NativePointer, 
 };
@@ -151,7 +151,7 @@ export var hookCode = ( hookOptions:HookOption[], externalSymbols?: Map<string, 
             }
         }
         if(nearjump){
-            console.log('use long jump ')
+            console.log('use near jump ')
         }
         allocatedBuffer.push(buffer); // always store the alloced buffer ptr, avoid it will be free when hook code try to call it 
         hooks.push({

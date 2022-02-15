@@ -1,17 +1,21 @@
 
 #include <stdio.h>
 
-// #define LOG_INFOS(fmt, args...)                                       \
-// do{                                                                   \
-//     char buff[0x200];                                                 \
-//     snprintf(buff, 0x200, "[%s:%d]" fmt "\n", __FILE__, __LINE__, ##args);  \
-//     frida_log(buff);                                                  \
-// }while(0)
+#if 1
+#define LOG_INFOS(fmt, args...)                                       \
+do{                                                                   \
+    char buff[0x200];                                                 \
+    snprintf(buff, 0x200, "[%s:%d]" fmt, __FILE__, __LINE__, ##args); \
+    frida_log(buff);                                                  \
+}while(0)
+#else
 
 #define LOG_INFOS(fmt, args...)                                                 \
 do {                                                                            \
     __android_log_print(3, "MyTest", "[%s:%d]", __FILE__, __LINE__, ##args);    \
 }while(0) 
+
+#endif
 
 extern "C" void frida_log(const char*);
 
@@ -33,13 +37,14 @@ extern "C" int dumpSelfMap()
 
 extern "C" int __android_log_print( int prio, const char *tag, const char *fmt, ...);
 static int test1(){
+    LOG_INFOS("call 1s");
     
     return 11;
 }
 extern "C" void test0()
 {
     test1();
-    LOG_INFOS("called");
+    LOG_INFOS("call 1");
     return ;
 }
 
